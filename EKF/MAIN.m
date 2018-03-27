@@ -17,7 +17,7 @@ R_SENSOR2BODY(1:3,1:3)= [-1 0 0;
                           0 0 -1];
 
 % Tau for bias -- from manufacturer
-tau= 3600;
+tau= 1000;  %Actual manuf. value
 BiasInstabW= deg2rad(0.5/3600);     % rad/s
 BiasInstabA= 0.05 * 9.80665 / 1000; % m/s2
 
@@ -75,11 +75,12 @@ for testNum= testInit:testLast
     u0= [ax0; ay0; az0; wx0; wy0; wz0];
     
     % Allocate variables
-    Var= zeros(15, round(timeIMU_final)/dT);
+    Var= zeros(15, ceil(timeIMU_final/dT)); %For robustness
     Pk= zeros(15);
     x= zeros(15,N);
     xcorrected= zeros(15,N);
     x_star= zeros(15,1);
+    x_dot_star= zeros(15,1);
     x(:,1)= x_star;
     xcorrected(:,1)= x_star;
     t_sum= 0;
@@ -94,7 +95,7 @@ for testNum= testInit:testLast
     for k= 1:N-1
         
         % Simple integration
-        x_dot= F*( x(:,k) - x_star ) + Gu_tilda*( u(:,k) - u0 );
+        x_dot= x_dot_star + F * ( x(:,k) - x_star ) + Gu_tilda * ( u(:,k) - u0 );  %General form of discrete integration
         x(:,k+1)= x(:,k) + dt(k)*x_dot;
         
         % KF update
@@ -103,7 +104,12 @@ for testNum= testInit:testLast
             % System Matrices
             [Fn, F, Gu_tilda, Gw, H]=...
                 Matrices(x(:,k), u(1,k), u(2,k), u(3,k), u(4,k), u(5,k), u(6,k), tau);
-
+            
+            % New Star state
+            x_star = x(:,k);
+            x_dot_star = x_dot;
+            u0 = [u(1,k), u(2,k), u(3,k), u(4,k), u(5,k), u(6,k)]';
+            
             % Discretize system for GPS upate time (only for variance calculations)
             [Phi, Gamma, Gammaw_W_Gammaw]= Matrices2Discrete( F, Gu_tilda, Gw, H, Qw, dT );
 
@@ -127,7 +133,7 @@ for testNum= testInit:testLast
         t_sum= t_sum + dt(k);
                 
     end  
-    Var(:, round(timeIMU_final)/dT)= diag(Pk);
+    Var(:, ceil(timeIMU_final/dT))= diag(Pk); %For robustness
     
     % Plot errors for this run
     figure(SWITCH_KF_UPDATE+1); hold on;
@@ -171,7 +177,7 @@ for testNum= testInit:testLast
     
 end
 
-TT = 0:dT:timeIMU_final-dT;
+TT = 0:dT:timeIMU_final;
 std = 3*sqrt(Var);
 
 % Plots

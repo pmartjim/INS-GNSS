@@ -17,7 +17,7 @@ R_SENSOR2BODY(1:3,1:3)= [-1 0 0;
                           0 0 -1];
 
 % Tau for bias -- from manufacturer
-tau= 3600;
+tau= 1000;  %Actual manuf. value
 BiasInstabW= deg2rad(0.5/3600);     % rad/s
 BiasInstabA= 0.05 * 9.80665 / 1000; % m/s2
 
