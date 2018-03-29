@@ -1,11 +1,12 @@
-clear; format short; clc; close all;
+clear; format short; clc; %close all;
 
 % Parameters
 epochsInit= 5000; % Number of epochs used to calcualte bias
 R= 0.001^2 * eye(3); % Measurement variance matrix
 SWITCH_KF_UPDATE= 0;
-dT= 1; % KF Update period
-
+f_GPS = 2;
+dT= 1/f_GPS; % KF Update period
+f_IMU = 2000; % IMU data frequency (1/DT)
 
 % Convert from sensor-frame to body-frame (NED)
 R_SENSOR2BODY = zeros(6);
@@ -21,16 +22,26 @@ tau= 1000;  %Actual manuf. value
 BiasInstabW= deg2rad(0.5/3600);     % rad/s
 BiasInstabA= 0.05 * 9.80665 / 1000; % m/s2
 
-% Measured white noise SD
-sigma_IMU= [0.019342455000080;  % ax
-            0.018660194431183;  % ay
-            0.019979928602605;  % az
-            0.001239820655196;  % wx [rad]
-            0.001353946031205;  % wy [rad]
-            0.001297525572326]; % wx [rad]
+% % Measured white noise SD
+% sigma_IMU= [0.019342455000080;  % ax
+%             0.018660194431183;  % ay
+%             0.019979928602605;  % az
+%             0.001239820655196;  % wx [rad]
+%             0.001353946031205;  % wy [rad]
+%             0.001297525572326]; % wx [rad]
+
+% Manufacturer Data
+sigma_a = 0.06/60/sqrt(1/f_IMU);
+sigma_w = deg2rad(0.15/60/sqrt(1/f_IMU));
+sigma_IMU= [sigma_a;  % ax
+            sigma_a;  % ay
+            sigma_a;  % az
+            sigma_w;  % wx [rad]
+            sigma_w;  % wy [rad]
+            sigma_w]; % wx [rad]
        
 % Convert to PSD
-sigma_IMU= sigma_IMU * sqrt(1/2000);
+sigma_IMU= sigma_IMU * sqrt(1/f_IMU);
 
 % PSD for continuous model
 Qw= diag([sigma_IMU', ...
@@ -38,13 +49,13 @@ Qw= diag([sigma_IMU', ...
     BiasInstabW, BiasInstabW, BiasInstabW]).^2;
 
 
-testInit= 1; testLast = 4;
+testInit= 1; testLast = 10;
 for testNum= testInit:testLast
     disp(testNum);
         
     file= strcat('../DATA_STATIC/24x120k/20180228_12', num2str(testNum),'.txt');
     [timeIMU, gyrox, gyroy, gyroz, accx, accy, accz,...
-        ~, ~, ~, gyroSts, accSts, ~, ~, ~, ~]= DataRead(file); % rads
+        incx, incy, incz, gyroSts, accSts, ~, ~, ~, ~]= DataRead(file); % rads
     u= [accx, accy, accz, gyrox, gyroy, gyroz]';
     dt= diff(timeIMU);
     timeIMU_final= timeIMU(end);
@@ -59,8 +70,14 @@ for testNum= testInit:testLast
     ax0= mean(accx(1:epochsInit));
     ay0= mean(accy(1:epochsInit));
     az0= mean(accz(1:epochsInit));
-    phi0= atan2(-ay0,-az0);
-    theta0= atan2(ax0, sqrt(ay0^2 + az0^2));
+    
+    % Inclinometer for initialization
+    ix0= mean(incx(1:epochsInit));
+    iy0= mean(incy(1:epochsInit));
+    iz0= mean(incz(1:epochsInit));
+    phi0= (atan2(-iy0,-iz0));
+    theta0= (atan2(ix0, sqrt(iy0^2 + iz0^2)));
+    clear incx incy incz ix0 iy0 iz0
     
     % G estimation
     g= sqrt(ax0^2 + ay0^2 + az0^2);
@@ -81,7 +98,7 @@ for testNum= testInit:testLast
     [Phi, Gamma, Gammaw_W_Gammaw]= Matrices2Discrete( F, Gu_tilda, Gw, H, Qw, dT );
     
     % Simulation
-    Var= zeros(15, round(timeIMU_final)/dT);
+    Var= zeros(15, ceil(timeIMU_final/dT));  %For robustness
     Pk= zeros(15);
     x= zeros(15,N);
     xcorrected= zeros(15,N);
@@ -119,10 +136,10 @@ for testNum= testInit:testLast
         t_sum= t_sum + dt(k);
                 
     end  
-    Var(:, round(timeIMU_final)/dT)= diag(Pk);
+    Var(:, ceil(timeIMU_final/dT))= diag(Pk);  %For robustness
     
     % Plot errors for this run
-    figure(SWITCH_KF_UPDATE+1); hold on;
+    figure(1); hold on;
     
     subplot(3,3,1); hold on;
     plot(timeIMU,x(1,:));
@@ -163,45 +180,45 @@ for testNum= testInit:testLast
     
 end
 
-TT = 0:dT:timeIMU_final-dT;
-std = 3*sqrt(Var);
+TT = 0:dT:timeIMU_final;
+deviation = sqrt(Var);  %1sigma value
 
 % Plots
 subplot(3,3,1); hold on;
-plot(TT, std(1,:), 'r.')
-plot(TT, -std(1,:), 'r.')
+plot(TT, deviation(1,:), 'r.')
+plot(TT, -deviation(1,:), 'r.')
 
 subplot(3,3,2); hold on;
-plot(TT, std(2,:), 'r.')
-plot(TT, -std(2,:), 'r.')
+plot(TT, deviation(2,:), 'r.')
+plot(TT, -deviation(2,:), 'r.')
 
 subplot(3,3,3); hold on;
-plot(TT, std(3,:), 'r.')
-plot(TT, -std(3,:), 'r.')
+plot(TT, deviation(3,:), 'r.')
+plot(TT, -deviation(3,:), 'r.')
 
 subplot(3,3,4); hold on;
-plot(TT, std(4,:), 'r.')
-plot(TT, -std(4,:), 'r.')
+plot(TT, deviation(4,:), 'r.')
+plot(TT, -deviation(4,:), 'r.')
 
 subplot(3,3,5); hold on;
-plot(TT, std(5,:), 'r.')
-plot(TT, -std(5,:), 'r.')
+plot(TT, deviation(5,:), 'r.')
+plot(TT, -deviation(5,:), 'r.')
 
 subplot(3,3,6); hold on;
-plot(TT, std(6,:), 'r.')
-plot(TT, -std(6,:), 'r.')
+plot(TT, deviation(6,:), 'r.')
+plot(TT, -deviation(6,:), 'r.')
 
 subplot(3,3,7); hold on;
-plot(TT,rad2deg(std(7,:)), 'r.')
-plot(TT,-rad2deg(std(7,:)), 'r.')
+plot(TT,rad2deg(deviation(7,:)), 'r.')
+plot(TT,-rad2deg(deviation(7,:)), 'r.')
 
 subplot(3,3,8); hold on;
-plot(TT,rad2deg(std(8,:)), 'r.')
-plot(TT,-rad2deg(std(8,:)), 'r.')
+plot(TT,rad2deg(deviation(8,:)), 'r.')
+plot(TT,-rad2deg(deviation(8,:)), 'r.')
 
 subplot(3,3,9); hold on;
-plot(TT,rad2deg(std(9,:)), 'r.')
-plot(TT,-rad2deg(std(9,:)), 'r.')
+plot(TT,rad2deg(deviation(9,:)), 'r.')
+plot(TT,-rad2deg(deviation(9,:)), 'r.')
 
 
 
